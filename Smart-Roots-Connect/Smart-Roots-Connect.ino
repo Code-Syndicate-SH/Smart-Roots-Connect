@@ -17,16 +17,24 @@
 #include <PubSubClient.h>
 #include <WiFiClientSecure.h>
 #include <WiFi.h>
+#include <arduino-timer.h>
+#include <FS.h>
+#include <SD.h>
+#include <SPI.h>
+
+#define SD_CS 5  // Chip select pin for SD card module
 // Update these with values suitable for your network.
-
-char ssid[] = "wifi name";
-char password[] = "wifi_pass";
-const char *mqtt_broker = "your instance or public broker";
-const char *topic = "Readings";
-const char *mqtt_username = "your_username";
-const char *mqtt_password = "your_password";
+File logFile;
+auto timer = timer_create_default();
+char ssid[] = "OPPO A38";
+char password[] = "shravR123";
+const char *mqtt_broker = "e902c05a.ala.eu-central-1.emqxsl.com";
+const char *topicReadings = "Readings";
+const String topicRemoteToggle= "Toggle/"+WiFi.macAddress();
+const char *mqtt_username = "ShravanRamjathan";
+const char *mqtt_password = "EmwDW3HGRDsg8Je";
 const int mqtt_port = 8883;
-
+const uint DATA_INTERVAL = 10000;
 const char* ca_cert= \
 "-----BEGIN CERTIFICATE-----\n" \
 "MIIDrzCCApegAwIBAgIQCDvgVpBCRrGhdWrJWZHHSjANBgkqhkiG9w0BAQUFADBh\n" \
@@ -55,9 +63,22 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message arrived [");
   Serial.print(topic);
   Serial.print("] ");
+  String message;
   for (int i=0;i<length;i++) {
-    Serial.print((char)payload[i]);
+    message+=(char)payload[i];
   }
+  String subscribedTopic = String(topic);
+  if(subscribedTopic==topicRemoteToggle){
+   Serial.println("This is the payload we got: "+message);
+    // the purpose of this is to fetch the live reading, to which now we will send it over to the arduino
+    if(Serial2.availableForWrite()){
+    Serial2.println(message)
+  }
+
+  }else{
+    Serial.println("Unable to subscribe to topic to toggle componenets");
+  }
+  
   Serial.println();
 }
 
@@ -86,22 +107,139 @@ void reconnect() {
 
 void setup()
 {
-  Serial.begin(57600);
+  Serial.begin(115200);    
+  Serial2.begin(9600, SERIAL_8N1, 16, 17);  // RX=16, TX=17 from Mega
   WiFi.begin(ssid, password);
-  
+  Serial.println("We are booted");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.println("Connecting to WiFi..");
-}
+   
+  }
 espClient.setCACert(ca_cert);
   client.setServer(mqtt_broker, mqtt_port);
   client.setCallback(callback);
-  reconnect();
-  delay(1500);
-}
+   if (!SD.begin(SD_CS)) {
+    Serial.println("SD Card Mount Failed!");
+  } else {
+    Serial.println("SD Card initialized.");
 
+    // Open file for appending
+    logFile = SD.open("/data.txt", FILE_APPEND);
+    if (!logFile) {
+      Serial.println("Failed to open file for writing!");
+    } else {
+      // Write CSV header if file is empty
+      if (logFile.size() == 0) {
+        logFile.println("PH,Light,EC,FlowRate,Humidity,Temperature");
+      }
+      logFile.close();
+    }
+  }
+  reconnect();
+  timer.every(DATA_INTERVAL,publishToBroker );
+}
+void subScribeToBrokerToggle(){
+if(client.connect(topicRemoteToggle.c_str(), mqtt_username, mqtt_password)){
+  
+}
+}
+bool publishToBroker(void *){
+   String incomingData = "";
+  if (Serial2.available()) {
+     incomingData = Serial2.readStringUntil('\n'); 
+    incomingData.trim();
+
+    if (incomingData.length() > 0) {
+      Serial.println("Received from Mega:");
+      Serial.println(incomingData);
+    }
+  }else{
+    Serial.println("Not fetching data from arduino");
+  }
+    String ph = extractValue(incomingData, "PH");
+  String light = extractValue(incomingData, "Light");
+  String ec = extractValue(incomingData, "EC");
+  String flow = extractValue(incomingData, "FlowRate");
+  String humidity = extractValue(incomingData, "Humidity");
+  String temperature = extractValue(incomingData, "Temperature");
+  String msg = "{";
+msg += "\"MacAddress\":\"" + WiFi.macAddress() + "\",";
+msg += "\"PH\":\"" + ph + "\",";
+msg += "\"Light\":\"" + light + "\",";
+msg += "\"EC\":\"" + ec + "\",";
+msg += "\"FlowRate\":\"" + flow + "\",";
+msg += "\"Humidity\":\"" + humidity + "\",";
+msg += "\"Temperature\":\"" + temperature + "\"";
+msg += "}";
+ if (client.connect("Veg-Tent-ESP32", mqtt_username, mqtt_password)) {
+      Serial.println("connected");
+      // Once connected, publish an announcement...
+      client.publish("Readings",msg.c_str());
+  
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      // Wait 5 seconds before retrying
+      delay(5000);
+    }
+
+  return true;
+}
 void loop()
 {
-   
+  timer.tick();
+   if (Serial2.available()) {
+    String incomingData = Serial2.readStringUntil('\n'); 
+    incomingData.trim();
+
+    if (incomingData.length() > 0) {
+      Serial.println("Received from Mega:");
+      Serial.println(incomingData);
+
+      // Save to SD card in CSV format
+      saveToSD(incomingData);
+    }
+  }else{
+    Serial.println("Not available");
+  }
   client.loop();
 }
+
+void saveToSD(String jsonData) {
+  // Simple string extraction (not full JSON parsing, but works since format is fixed)
+
+  String ph = extractValue(jsonData, "PH");
+  String light = extractValue(jsonData, "Light");
+  String ec = extractValue(jsonData, "EC");
+  String flow = extractValue(jsonData, "FlowRate");
+  String humidity = extractValue(jsonData, "Humidity");
+  String temperature = extractValue(jsonData, "Temperature");
+
+  String csvRow = ph + "," + light + "," + ec + "," + flow + "," + humidity + "," + temperature;
+
+  logFile = SD.open("/data.txt", FILE_APPEND);
+  if (logFile) {
+    logFile.println(csvRow);
+    logFile.close();
+    Serial.println("Saved to SD: " + csvRow);
+  } else {
+    Serial.println("Error opening file for writing.");
+  }
+}
+
+String extractValue(String data, String key) {
+  int start = data.indexOf("\"" + key + "\"");
+  if (start == -1) return "";
+
+  start = data.indexOf(":", start);
+  if (start == -1) return "";
+
+  int firstQuote = data.indexOf("\"", start + 1);
+  int secondQuote = data.indexOf("\"", firstQuote + 1);
+  if (firstQuote == -1 || secondQuote == -1) return "";
+
+  return data.substring(firstQuote + 1, secondQuote);
+}
+
