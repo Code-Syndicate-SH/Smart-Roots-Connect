@@ -18,23 +18,21 @@
 #include <WiFiClientSecure.h>
 #include <WiFi.h>
 #include <arduino-timer.h>
-#include <FS.h>
-#include <SD.h>
-#include <SPI.h>
 
-#define SD_CS 5  // Chip select pin for SD card module
+
+//#define SD_CS 5  // Chip select pin for SD card module
 // Update these with values suitable for your network.
-File logFile;
+//File logFile;
 auto timer = timer_create_default();
-char ssid[] = "OPPO A38";
-char password[] = "shravR123";
+char ssid[] = "Guest_Wi-fi";
+char password[] = "hsrcwpa135790";
 const char *mqtt_broker = "e902c05a.ala.eu-central-1.emqxsl.com";
 const char *topicReadings = "Readings";
-const String topicRemoteToggle= "Toggle/"+WiFi.macAddress();
+ String topicRemoteToggle  = "";
 const char *mqtt_username = "ShravanRamjathan";
 const char *mqtt_password = "EmwDW3HGRDsg8Je";
 const int mqtt_port = 8883;
-const uint DATA_INTERVAL = 10000;
+const uint DATA_INTERVAL = 10000;   // Uploading
 const char* ca_cert= \
 "-----BEGIN CERTIFICATE-----\n" \
 "MIIDrzCCApegAwIBAgIQCDvgVpBCRrGhdWrJWZHHSjANBgkqhkiG9w0BAQUFADBh\n" \
@@ -59,10 +57,16 @@ const char* ca_cert= \
 "CAUw7C29C79Fv1C5qfPrmAESrciIxpg0X40KPMbp1ZWVbd4=" \
 "-----END CERTIFICATE-----\n";
 WiFiClientSecure espClient;
+
+ String incomingData = "";
 void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("Message arrived [");
   Serial.print(topic);
   Serial.print("] ");
+   Serial.println(WiFi.macAddress());
+  if(Serial2.availableForWrite()){
+    Serial2.println(WiFi.macAddress());
+  }
   String message;
   for (int i=0;i<length;i++) {
     message+=(char)payload[i];
@@ -72,7 +76,8 @@ void callback(char* topic, byte* payload, unsigned int length) {
    Serial.println("This is the payload we got: "+message);
     // the purpose of this is to fetch the live reading, to which now we will send it over to the arduino
     if(Serial2.availableForWrite()){
-    Serial2.println(message)
+    sendToggleCommand(message);
+  delay(200); 
   }
 
   }else{
@@ -89,12 +94,15 @@ void reconnect() {
   while (!client.connected()) {
     Serial.print("Attempting MQTT connection...");
     // Attempt to connect
-    if (client.connect("Veg-Tent-ESP32", mqtt_username, mqtt_password)) {
+    if (client.connect("Fred-Tent_Esp32", mqtt_username, mqtt_password)) {
       Serial.println("connected");
       // Once connected, publish an announcement...
+      
       client.publish("Readings","hello world");
       // ... and resubscribe
-      client.subscribe("Readings");
+      client.subscribe(topicRemoteToggle.c_str());
+      Serial.print("Subscribed to: ");
+      Serial.println(topicRemoteToggle);
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
@@ -111,15 +119,17 @@ void setup()
   Serial2.begin(9600, SERIAL_8N1, 16, 17);  // RX=16, TX=17 from Mega
   WiFi.begin(ssid, password);
   Serial.println("We are booted");
+  
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+    delay(3000);
     Serial.println("Connecting to WiFi..");
    
   }
+ topicRemoteToggle = "Toggle/" + WiFi.macAddress();
 espClient.setCACert(ca_cert);
   client.setServer(mqtt_broker, mqtt_port);
   client.setCallback(callback);
-   if (!SD.begin(SD_CS)) {
+  /* if (!SD.begin(SD_CS)) {
     Serial.println("SD Card Mount Failed!");
   } else {
     Serial.println("SD Card initialized.");
@@ -135,43 +145,46 @@ espClient.setCACert(ca_cert);
       }
       logFile.close();
     }
-  }
+  }*/
   reconnect();
+  timer.every(2000, FetchSerialData);
   timer.every(DATA_INTERVAL,publishToBroker );
 }
+void loop()
+{
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
+  timer.tick();
+  delay(10);
+}
+
+
 void subScribeToBrokerToggle(){
 if(client.connect(topicRemoteToggle.c_str(), mqtt_username, mqtt_password)){
   
 }
 }
 bool publishToBroker(void *){
-   String incomingData = "";
-  if (Serial2.available()) {
-     incomingData = Serial2.readStringUntil('\n'); 
-    incomingData.trim();
-
-    if (incomingData.length() > 0) {
-      Serial.println("Received from Mega:");
-      Serial.println(incomingData);
-    }
-  }else{
-    Serial.println("Not fetching data from arduino");
-  }
-    String ph = extractValue(incomingData, "PH");
+   
+ 
+  String ph = extractValue(incomingData, "PH");
   String light = extractValue(incomingData, "Light");
   String ec = extractValue(incomingData, "EC");
   String flow = extractValue(incomingData, "FlowRate");
   String humidity = extractValue(incomingData, "Humidity");
   String temperature = extractValue(incomingData, "Temperature");
+  //saveToSD(ph, light, ec, flow, humidity, temperature);
   String msg = "{";
-msg += "\"MacAddress\":\"" + WiFi.macAddress() + "\",";
-msg += "\"PH\":\"" + ph + "\",";
-msg += "\"Light\":\"" + light + "\",";
-msg += "\"EC\":\"" + ec + "\",";
-msg += "\"FlowRate\":\"" + flow + "\",";
-msg += "\"Humidity\":\"" + humidity + "\",";
-msg += "\"Temperature\":\"" + temperature + "\"";
-msg += "}";
+    msg += "\"MacAddress\":\"" + WiFi.macAddress() + "\",";
+    msg += "\"PH\":\"" + ph + "\",";
+    msg += "\"Light\":\"" + light + "\",";
+    msg += "\"EC\":\"" + ec + "\",";
+    msg += "\"FlowRate\":\"" + flow + "\",";
+    msg += "\"Humidity\":\"" + humidity + "\",";
+    msg += "\"Temperature\":\"" + temperature + "\"";
+    msg += "}";
  if (client.connect("Veg-Tent-ESP32", mqtt_username, mqtt_password)) {
       Serial.println("connected");
       // Once connected, publish an announcement...
@@ -187,35 +200,22 @@ msg += "}";
 
   return true;
 }
-void loop()
-{
-  timer.tick();
-   if (Serial2.available()) {
-    String incomingData = Serial2.readStringUntil('\n'); 
-    incomingData.trim();
-
-    if (incomingData.length() > 0) {
-      Serial.println("Received from Mega:");
-      Serial.println(incomingData);
-
-      // Save to SD card in CSV format
-      saveToSD(incomingData);
+bool FetchSerialData(void *){
+ if (Serial2.available()) {
+    incomingData = Serial2.readStringUntil('>');  // stop at end marker
+  int start = incomingData.indexOf('<');
+    if (start != -1) {
+      incomingData = incomingData.substring(start + 1);
+      incomingData.trim();
+    } else {
+        Serial.println("Malformed data");
+   
     }
-  }else{
-    Serial.println("Not available");
+    return true;      // we return true so this method continually runs, refer to docs of arduino-timer library  
   }
-  client.loop();
+  return true; 
 }
-
-void saveToSD(String jsonData) {
-  // Simple string extraction (not full JSON parsing, but works since format is fixed)
-
-  String ph = extractValue(jsonData, "PH");
-  String light = extractValue(jsonData, "Light");
-  String ec = extractValue(jsonData, "EC");
-  String flow = extractValue(jsonData, "FlowRate");
-  String humidity = extractValue(jsonData, "Humidity");
-  String temperature = extractValue(jsonData, "Temperature");
+/*void saveToSD(String ph, String light, String ec, String flow, String humidity, String temperature) {
 
   String csvRow = ph + "," + light + "," + ec + "," + flow + "," + humidity + "," + temperature;
 
@@ -228,7 +228,7 @@ void saveToSD(String jsonData) {
     Serial.println("Error opening file for writing.");
   }
 }
-
+*/
 String extractValue(String data, String key) {
   int start = data.indexOf("\"" + key + "\"");
   if (start == -1) return "";
@@ -241,5 +241,10 @@ String extractValue(String data, String key) {
   if (firstQuote == -1 || secondQuote == -1) return "";
 
   return data.substring(firstQuote + 1, secondQuote);
+}
+void sendToggleCommand(String json) {
+    String packet = "<" + json + ">";
+  Serial2.print(packet); 
+  Serial.println(packet);
 }
 
