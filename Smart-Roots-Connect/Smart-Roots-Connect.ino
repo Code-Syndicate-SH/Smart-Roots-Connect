@@ -24,13 +24,13 @@
 // Update these with values suitable for your network.
 //File logFile;
 auto timer = timer_create_default();
-char ssid[] = "Guest_Wi-fi";
-char password[] = "hsrcwpa135790";
-const char *mqtt_broker = "e902c05a.ala.eu-central-1.emqxsl.com";
-const char *topicReadings = "Readings";
+char ssid[] = "xxxxxxxxx";
+char password[] = "xxxxxxxxxxx";
+const char *mqtt_broker = "xxxxxxxxx";
+const char *topicReadings = "xxxxxxxx";
  String topicRemoteToggle  = "";
-const char *mqtt_username = "ShravanRamjathan";
-const char *mqtt_password = "EmwDW3HGRDsg8Je";
+const char *mqtt_username = "xxxxxxx";
+const char *mqtt_password = "xxxxxxxx";
 const int mqtt_port = 8883;
 const uint DATA_INTERVAL = 10000;   // Uploading
 const char* ca_cert= \
